@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>EPRA EER System (Offline, JS)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+.sticky-th th { position: sticky; top: 0; background: #f8f9fa; z-index: 2; }
+.mini { font-size:.85rem; color:#6c757d; }
+.totals-row { font-weight:700; background:#f1f3f5; }
+.small-input { max-width:160px; display:inline-block; }
+.summary-box { background:#fff; padding:12px; border-radius:6px; box-shadow:0 0 6px rgba(0,0,0,0.03);}
+</style>
+</head>
+<body class="p-4 bg-light">
+<div class="container">
+<h2 class="mb-4 text-center">EPRA Energy Efficiency Ratio (EER) — Fully Offline JS</h2>
+
+<div class="row g-3 mb-3 align-items-end">
+  <div class="col-md-6">
+    <input type="file" id="fileInput" class="form-control" accept=".xls,.xlsx,.csv"/>
+    <div class="mini mt-1">
+      Expected layout: Row1: Facility | Energy Used | Production | Weather1 | Weather2. Rows 2+: monthly data.
+    </div>
+  </div>
+  <div class="col-md-6 d-flex gap-2">
+    <button class="btn btn-primary" onclick="processExcel()">Process Excel</button>
+    <button class="btn btn-outline-secondary" onclick="resetAll()">Reset</button>
+    <div class="ms-auto text-end">
+      <label class="form-label mb-0">Cutoff (EER)</label>
+      <input id="cutoff" class="form-control small-input" type="number" step="0.01" value="0.9"/>
+      <button class="btn btn-success btn-sm mt-2" onclick="applyCutoff()">Apply Cutoff</button>
+    </div>
+  </div>
+</div>
+
+<h5>1) Unified Facility Table</h5>
+<div class="table-responsive mb-4">
+  <table id="rawUnified" class="table table-bordered table-striped">
+    <thead class="table-light sticky-th"></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<h5>2) Facility Table with Totals (Labeled)</h5>
+<div class="table-responsive mb-4">
+  <table id="totalsTable" class="table table-bordered table-striped">
+    <thead class="table-light sticky-th"></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<h5>3) Monthly Totals & Averages</h5>
+<div class="table-responsive mb-4">
+  <table id="monthlyTable" class="table table-bordered table-striped">
+    <thead class="table-light">
+      <tr><th>Month</th><th>Total Energy (Y)</th><th>Total Production (X1)</th><th>Avg Weather1 (X2)</th><th>Avg Weather2 (X3)</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<h5>4) Regression Statistics</h5>
+<div class="table-responsive mb-4">
+  <table class="table table-bordered table-striped" id="regressionStats">
+    <thead class="table-light"><tr><th>Parameter</th><th>Coefficient</th><th>Std Error</th><th>HDI 2.5%</th><th>HDI 97.5%</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <p id="r2Text" class="mt-2"></p>
+</div>
+
+<h5>5) Facilities Above Cutoff — Old & New EUI</h5>
+<div class="table-responsive mb-4">
+  <table class="table table-bordered table-striped" id="cutoffTable">
+    <thead class="table-light"><tr>
+      <th>Facility</th><th>EER</th><th>Actual EUI</th><th>Predicted EUI</th>
+      <th>Required New EUI</th><th>Possible Savings</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<h5>6) EER Ogive</h5>
+<canvas id="ogiveChart" height="100"></canvas>
+
+<h5>7) Facility Credits Overview (All Facilities)</h5>
+<canvas id="creditsChart" height="100"></canvas>
+
+<h5>8) All Facilities — Possible Savings / Credits Table</h5>
+<div class="table-responsive mb-4">
+  <table class="table table-bordered table-striped" id="allCreditsTable">
+    <thead class="table-light"><tr>
+      <th>Facility</th><th>EER</th><th>Actual EUI</th><th>Predicted EUI</th><th>Possible Savings / Credits</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+// ---------------- Utility ----------------
+function num(v){const x=parseFloat(v); return Number.isFinite(x)?x:0;}
+function mean(A){return A.reduce((a,b)=>a+b,0)/A.length;}
+
+// ---------------- State ----------------
+let unified={months:[],facilities:[],cols:{nMonths:24}};
+let regression={beta0:0,beta1:0,beta2:0,beta3:0,r2:0,se:[],hdi:[]};
+
+function resetAll(){
+  ['#rawUnified thead','#rawUnified tbody','#totalsTable thead','#totalsTable tbody','#monthlyTable tbody','#regressionStats tbody','#cutoffTable tbody','#allCreditsTable tbody','#r2Text'].forEach(s=>{
+    document.querySelector(s)&&(document.querySelector(s).innerHTML='');
+  });
+  unified={months:[],facilities:[],cols:{nMonths:24}};
+}
+
+// ---------------- Excel Processing ----------------
+function processExcel(){
+  const file=document.getElementById('fileInput').files[0];
+  if(!file){alert('Choose Excel file'); return;}
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const wb=XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+    const sheet=wb.Sheets[wb.SheetNames[0]];
+    const raw=XLSX.utils.sheet_to_json(sheet,{header:1,blankrows:false});
+    if(raw.length<3){alert('Sheet too short'); return;}
+    const nMonths=24;
+    const facilities=[];
+    for(let r=2,idx=1;r<raw.length;r++,idx++){
+      const row=raw[r];
+      if(!row||row.length===0) continue;
+      const name=row[0]?String(row[0]).trim():`Facility ${idx}`;
+      const monthly=[];
+      for(let k=0;k<nMonths;k++){
+        monthly.push({energy:num(row[1+k]),production:num(row[25+k]),w1:num(row[49+k]),w2:num(row[73+k])});
+      }
+      facilities.push({name,monthly});
+    }
+    unified.facilities=facilities;
+    const months=[];
+    let start=new Date(2020,0,1);
+    for(let i=0;i<nMonths;i++){months.push(start.toLocaleString('default',{month:'short',year:'numeric'})); start.setMonth(start.getMonth()+1);}
+    unified.months=months;
+    buildUnifiedTable(); buildTotalsTable(); buildMonthlyTable(); computeRegression(); applyCutoff();
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ---------------- Tables ----------------
+function buildUnifiedTable(){
+  const thead=document.querySelector('#rawUnified thead'), tbody=document.querySelector('#rawUnified tbody');
+  thead.innerHTML=''; tbody.innerHTML='';
+  const n=unified.cols.nMonths, months=unified.months;
+  const tr1=document.createElement('tr');
+  tr1.innerHTML=`<th rowspan="2">Facility</th><th colspan="${n}">Energy</th><th colspan="${n}">Production</th><th colspan="${n}">Weather1</th><th colspan="${n}">Weather2</th>`;
+  thead.appendChild(tr1);
+  const tr2=document.createElement('tr'); ['','','',''].forEach(()=>{months.forEach(m=>tr2.innerHTML+=`<th>${m}</th>`);}); thead.appendChild(tr2);
+  unified.facilities.forEach(f=>{
+    const tr=document.createElement('tr'); tr.innerHTML=`<td>${f.name}</td>`;
+    f.monthly.forEach(m=>tr.innerHTML+=`<td>${m.energy}</td>`);
+    f.monthly.forEach(m=>tr.innerHTML+=`<td>${m.production}</td>`);
+    f.monthly.forEach(m=>tr.innerHTML+=`<td>${m.w1}</td>`);
+    f.monthly.forEach(m=>tr.innerHTML+=`<td>${m.w2}</td>`);
+    tbody.appendChild(tr);
+  });
+}
+
+function buildTotalsTable(){
+  const tbody=document.querySelector('#totalsTable tbody'); 
+  const thead=document.querySelector('#totalsTable thead');
+  tbody.innerHTML=''; thead.innerHTML='';
+
+  const n=unified.cols.nMonths;
+  const months=unified.months;
+
+  // Header
+  const tr1=document.createElement('tr');
+  tr1.innerHTML=`<th rowspan="2">Facility</th>
+                 <th colspan="${n}">Energy</th>
+                 <th colspan="${n}">Production</th>
+                 <th colspan="${n}">Weather1</th>
+                 <th colspan="${n}">Weather2</th>`;
+  thead.appendChild(tr1);
+
+  const tr2=document.createElement('tr');
+  ['Energy','Production','Weather1','Weather2'].forEach(()=>{
+    months.forEach(m=>{
+      tr2.innerHTML+=`<th>${m}</th>`;
+    });
+  });
+  thead.appendChild(tr2);
+
+  // Compute sums
+  const sumE=Array(n).fill(0), sumP=Array(n).fill(0), sumW1=Array(n).fill(0), sumW2=Array(n).fill(0);
+  unified.facilities.forEach(f=>{
+    f.monthly.forEach((m,k)=>{
+      sumE[k]+=m.energy; sumP[k]+=m.production; sumW1[k]+=m.w1; sumW2[k]+=m.w2;
+    });
+  });
+
+  // Facility rows
+  unified.facilities.forEach(f=>{
+    const tr=document.createElement('tr'); 
+    tr.innerHTML=`<td>${f.name}</td>`;
+    f.monthly.forEach(m=>tr.innerHTML+=`<td>${m.energy}</td>`);
+    f.monthly.forEach(m=>tr.innerHTML+=`<td>${m.production}</td>`);
+    f.monthly.forEach(m=>tr.innerHTML+=`<td>${m.w1}</td>`);
+    f.monthly.forEach(m=>tr.innerHTML+=`<td>${m.w2}</td>`);
+    tbody.appendChild(tr);
+  });
+
+  // Totals row
+  const trTotal=document.createElement('tr'); 
+  trTotal.classList.add('totals-row'); 
+  trTotal.innerHTML=`<td>Totals</td>`;
+  sumE.forEach(v=>trTotal.innerHTML+=`<td>${v.toFixed(2)}</td>`);
+  sumP.forEach(v=>trTotal.innerHTML+=`<td>${v.toFixed(2)}</td>`);
+  sumW1.forEach(v=>trTotal.innerHTML+=`<td>${v.toFixed(2)}</td>`);
+  sumW2.forEach(v=>trTotal.innerHTML+=`<td>${v.toFixed(2)}</td>`);
+  tbody.appendChild(trTotal);
+}
+
+function buildMonthlyTable(){
+  const tbody=document.querySelector('#monthlyTable tbody'); tbody.innerHTML='';
+  const n=unified.cols.nMonths, months=unified.months;
+  for(let k=0;k<n;k++){
+    let sumE=0,sumP=0,sumW1=0,sumW2=0;
+    unified.facilities.forEach(f=>{const m=f.monthly[k]; sumE+=m.energy; sumP+=m.production; sumW1+=m.w1; sumW2+=m.w2;});
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${months[k]}</td><td>${sumE.toFixed(2)}</td><td>${sumP.toFixed(2)}</td><td>${(sumW1/unified.facilities.length).toFixed(2)}</td><td>${(sumW2/unified.facilities.length).toFixed(2)}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+// ---------------- Regression ----------------
+function computeRegression(){
+  const Y=[], X1=[], X2=[], X3=[];
+  unified.facilities.forEach(f=>{
+    const totalE=f.monthly.reduce((s,m)=>s+m.energy,0);
+    const totalP=f.monthly.reduce((s,m)=>s+m.production,0);
+    const avgW1=mean(f.monthly.map(m=>m.w1));
+    const avgW2=mean(f.monthly.map(m=>m.w2));
+    Y.push(totalE); X1.push(totalP); X2.push(avgW1); X3.push(avgW2);
+  });
+  const n = Y.length;
+  const X = X1.map((v,i)=>[1, X1[i], X2[i], X3[i]]);
+
+  function matMul(a,b){const res=Array(a.length).fill(0).map(()=>Array(b[0].length).fill(0)); for(let i=0;i<a.length;i++){for(let j=0;j<b[0].length;j++){for(let k=0;k<b.length;k++){res[i][j]+=a[i][k]*b[k][j];}}} return res;}
+  function transpose(m){return m[0].map((_,i)=>m.map(r=>r[i]));}
+  function inverse3x3(m){const a=m[0][0],b=m[0][1],c=m[0][2]; const d=m[1][0],e=m[1][1],f=m[1][2]; const g=m[2][0],h=m[2][1],i=m[2][2]; const det=a*(e*i-f*h)-b*(d*i-f*g)+c*(d*h-e*g); if(det===0) return [[0,0,0],[0,0,0],[0,0,0]]; return [[(e*i-f*h)/det,(c*h-b*i)/det,(b*f-c*e)/det],[(f*g-d*i)/det,(a*i-c*g)/det,(c*d-a*f)/det],[(d*h-e*g)/det,(b*g-a*h)/det,(a*e-b*d)/det]];}
+  
+  const Xt=transpose(X); const XtX=matMul(Xt,X); const XtY=matMul(Xt,Y.map(v=>[v]));
+  const betaMat=matMul(inverse3x3(XtX.slice(0,3).map(r=>r.slice(0,3))),XtY.slice(0,3));
+  regression.beta0=betaMat[0][0]; regression.beta1=betaMat[1][0]; regression.beta2=betaMat[2][0]; regression.beta3=betaMat[3]?betaMat[3][0]:0;
+
+  const residuals=Y.map((y,i)=>y-(regression.beta0+regression.beta1*X1[i]+regression.beta2*X2[i]+regression.beta3*X3[i]));
+  const sigma=Math.sqrt(residuals.reduce((s,v)=>s+v*v,0)/(n-4));
+  const se0=sigma*Math.sqrt(inverse3x3(XtX.slice(0,3).map(r=>r.slice(0,3)))[0][0]);
+  const se1=sigma*Math.sqrt(inverse3x3(XtX.slice(0,3).map(r=>r.slice(0,3)))[1][1]);
+  const se2=sigma*Math.sqrt(inverse3x3(XtX.slice(0,3).map(r=>r.slice(0,3)))[2][2]);
+  regression.se=[se0,se1,se2];
+  regression.hdi=[[regression.beta0-1.96*se0,regression.beta0+1.96*se0],[regression.beta1-1.96*se1,regression.beta1+1.96*se1],[regression.beta2-1.96*se2,regression.beta2+1.96*se2]];
+
+  const tbody=document.querySelector('#regressionStats tbody'); tbody.innerHTML='';
+  [['Intercept',regression.beta0,se0,regression.hdi[0][0],regression.hdi[0][1]],
+   ['X1',regression.beta1,se1,regression.hdi[1][0],regression.hdi[1][1]],
+   ['X2',regression.beta2,se2,regression.hdi[2][0],regression.hdi[2][1]],
+   ['X3',regression.beta3,0,0,0]].forEach(r=>{const tr=document.createElement('tr'); tr.innerHTML=`<td>${r[0]}</td><td>${r[1].toFixed(4)}</td><td>${r[2].toFixed(4)}</td><td>${r[3].toFixed(4)}</td><td>${r[4].toFixed(4)}</td>`; tbody.appendChild(tr);});
+
+  const ymean=mean(Y); const ss_tot=Y.reduce((s,y)=>s+(y-ymean)**2,0);
+  const ss_res=residuals.reduce((s,r)=>s+r**2,0); regression.r2=1-ss_res/ss_tot;
+  document.getElementById('r2Text').innerText=`R² ≈ ${regression.r2.toFixed(4)}`;
+
+  unified.facilities.forEach((f,i)=>{
+    const totalE=f.monthly.reduce((s,m)=>s+m.energy,0);
+    const totalP=f.monthly.reduce((s,m)=>s+m.production,0);
+    const avgW1=mean(f.monthly.map(m=>m.w1));
+    const avgW2=mean(f.monthly.map(m=>m.w2));
+    f.actual_eui=totalP>0?totalE/totalP:0;
+    f.predicted_eui=totalP>0?(regression.beta0+regression.beta1*totalP+regression.beta2*avgW1+regression.beta3*avgW2)/totalP:0;
+    f.eer=f.predicted_eui>0?f.actual_eui/f.predicted_eui:0;
+    f.possible_savings=(f.eer - parseFloat(document.getElementById('cutoff')?.value||0)) * totalP;
+  });
+}
+
+// ---------------- Cutoff & Credits ----------------
+function applyCutoff(){
+  const cutoff=parseFloat(document.getElementById('cutoff').value);
+  const tbody=document.querySelector('#cutoffTable tbody'); tbody.innerHTML='';
+
+  unified.facilities.filter(f=>f.eer>cutoff).forEach(f=>{
+    const newEUI=cutoff*f.predicted_eui;
+    const savings=(f.actual_eui-newEUI)*f.monthly.reduce((s,m)=>s+m.production,0);
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${f.name}</td><td>${f.eer.toFixed(3)}</td><td>${f.actual_eui.toFixed(3)}</td><td>${f.predicted_eui.toFixed(3)}</td><td>${newEUI.toFixed(3)}</td><td>${savings.toFixed(2)}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  plotOgive(); plotCredits();
+  const tbody2=document.querySelector('#allCreditsTable tbody'); tbody2.innerHTML='';
+  unified.facilities.forEach(f=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${f.name}</td><td>${f.eer.toFixed(3)}</td><td>${f.actual_eui.toFixed(3)}</td><td>${f.predicted_eui.toFixed(3)}</td><td>${f.possible_savings.toFixed(2)}</td>`;
+    tbody2.appendChild(tr);
+  });
+}
+
+// ---------------- Charts ----------------
+function plotOgive(){
+  const eers = unified.facilities.map(f=>f.eer).sort((a,b)=>a-b);
+  const cumFreq = eers.map((_,i)=> ((i+1)/eers.length*100).toFixed(2));
+
+  const ctx=document.getElementById('ogiveChart').getContext('2d');
+  if(window.ogiveChartInstance) window.ogiveChartInstance.destroy();
+
+  window.ogiveChartInstance = new Chart(ctx,{
+    type:'line',
+    data:{
+      labels: eers.map(v => v.toFixed(3)),
+      datasets:[{
+        label:'Cumulative % Frequency',
+        data: cumFreq,
+        fill:false,
+        borderColor:'blue',
+        tension:0.3
+      }]
+    },
+    options:{
+      responsive:true,
+      scales:{
+        x:{title:{display:true,text:'EER Values'}},
+        y:{title:{display:true,text:'Cumulative %'},min:0,max:100}
+      }
+    }
+  });
+}
+
+function plotCredits(){
+  const ctx=document.getElementById('creditsChart').getContext('2d');
+  if(window.creditsChartInstance) window.creditsChartInstance.destroy();
+  window.creditsChartInstance=new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:unified.facilities.map(f=>f.name),
+      datasets:[{label:'Credits / Savings',data:unified.facilities.map(f=>f.possible_savings),backgroundColor:'green'}]
+    },
+    options:{
+      responsive:true,
+      scales:{
+        y:{title:{display:true,text:'Credits / Savings'}}
+      }
+    }
+  });
+}
+</script>
+</body>
+</html>
