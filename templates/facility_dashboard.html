@@ -1,0 +1,106 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>EPRA EER Facility Calculator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"/>
+<style>
+.small-input { max-width:120px; display:inline-block; }
+.summary-box { background:#fff; padding:12px; border-radius:6px; box-shadow:0 0 6px rgba(0,0,0,0.03);}
+</style>
+</head>
+<body class="p-4 bg-light">
+<div class="container">
+  <h2 class="mb-4 text-center">EPRA EER — Facility Input</h2>
+
+  <div class="card p-3 mb-4">
+    <h5>Enter Monthly Data</h5>
+    <div class="row g-2 align-items-end">
+      <div class="col-md-2">
+        <label class="form-label">Cutoff EER</label>
+        <input type="number" id="cutoff" class="form-control small-input" step="0.01" value="0.9"/>
+      </div>
+      <div class="col-md-4 d-flex gap-2">
+        <button class="btn btn-primary mt-4" onclick="generateTable()">Generate 24-Month Table</button>
+        <button class="btn btn-outline-secondary mt-4" onclick="resetAll()">Reset</button>
+      </div>
+    </div>
+    <div id="monthlyInputs" class="mt-3"></div>
+  </div>
+
+  <div class="card p-3 mb-4">
+    <h5>Facility Results</h5>
+    <div id="facilityResults" class="summary-box"></div>
+  </div>
+</div>
+
+<script>
+// ---------------- Utility ----------------
+function num(v){const x=parseFloat(v); return Number.isFinite(x)?x:0;}
+
+// ---------------- Input Table ----------------
+function generateTable(){
+  const nMonths = 24; // fixed 24 months
+  const div = document.getElementById('monthlyInputs');
+  div.innerHTML = '<h6>Enter Monthly Energy & Production</h6>';
+  const table = document.createElement('table');
+  table.className = 'table table-bordered table-striped';
+  const thead = document.createElement('thead');
+  thead.innerHTML = '<tr><th>Month</th><th>Energy Used</th><th>Production</th></tr>';
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  for(let i=0;i<nMonths;i++){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i+1}</td>
+                    <td><input type="number" class="form-control energyInput" value="0"></td>
+                    <td><input type="number" class="form-control productionInput" value="0"></td>`;
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  div.appendChild(table);
+
+  const computeBtn = document.createElement('button');
+  computeBtn.className = 'btn btn-success mt-3';
+  computeBtn.innerText = 'Compute EER';
+  computeBtn.onclick = computeResults;
+  div.appendChild(computeBtn);
+}
+
+// ---------------- Compute ----------------
+function computeResults(){
+  const cutoff = parseFloat(document.getElementById('cutoff').value) || 0.9;
+  const energies = Array.from(document.getElementsByClassName('energyInput')).map(i=>num(i.value));
+  const productions = Array.from(document.getElementsByClassName('productionInput')).map(i=>num(i.value));
+  const totalE = energies.reduce((a,b)=>a+b,0);
+  const totalP = productions.reduce((a,b)=>a+b,0);
+
+  // Compute actual EUI and EER
+  const actualEUI = totalP>0 ? totalE/totalP : 0;
+  const actualEER = totalE>0 ? totalP/totalE : 0; // Production per unit Energy
+
+  // Required new EUI (based on cutoff)
+  const requiredNewEUI = actualEUI * (cutoff/actualEER);
+
+  // Possible savings for 2 years
+  const possibleSavings2Years = (actualEUI - requiredNewEUI) * totalP * 24; // 24 months = 2 years
+
+  // Display results
+  const divResults = document.getElementById('facilityResults');
+  divResults.innerHTML = `<p><strong>Actual EER:</strong> ${actualEER.toFixed(4)}</p>
+                          <p><strong>Required New EER:</strong> ${cutoff.toFixed(4)}</p>
+                          <p><strong>Actual EUI:</strong> ${actualEUI.toFixed(4)}</p>
+                          <p><strong>Required New EUI:</strong> ${requiredNewEUI.toFixed(4)}</p>
+                          <p><strong>Possible Energy Savings (2 years):</strong> ${possibleSavings2Years.toFixed(2)}</p>`;
+}
+
+// ---------------- Reset ----------------
+function resetAll(){
+  document.getElementById('monthlyInputs').innerHTML = '';
+  document.getElementById('facilityResults').innerHTML = '';
+  document.getElementById('cutoff').value = 0.9;
+}
+</script>
+</body>
+</html>
