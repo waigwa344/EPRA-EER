@@ -118,7 +118,7 @@ function avgNonNull(arr){const vals=arr.filter(x=>x!==null);return vals.length?(
 const categories=[{name:'Energy',type:'sum'},{name:'Production',type:'sum'},{name:'Weather1',type:'avg'},{name:'Weather2',type:'avg'}];
 let unifiedSummary=[], regressionCoeffs=null, ogiveChart=null;
 
-/* ----------------- Generate Tables ----------------- */
+/* ----------------- Generate Admin Tables ----------------- */
 function generateTables(){
   const container=document.getElementById('tablesContainer'); container.innerHTML='';
   const facilityCount=Math.max(0, parseInt(document.getElementById('facilityCount').value)||0);
@@ -129,8 +129,7 @@ function generateTables(){
     for(let m=1;m<=24;m++) tr.innerHTML+=`<th>${m}</th>`; thead.appendChild(tr); table.appendChild(thead);
     const tbody=document.createElement('tbody');
     for(let f=1;f<=facilityCount;f++){
-      let row=document.createElement('tr');
-      row.innerHTML=`<td><input type="text" class="form-control facility-name"></td>`;
+      let row=document.createElement('tr'); row.innerHTML=`<td><input type="text" class="form-control facility-name"></td>`;
       for(let m=1;m<=24;m++) row.innerHTML+=`<td><input type="text" class="form-control data-input"></td>`;
       tbody.appendChild(row);
     }
@@ -143,37 +142,25 @@ function generateTables(){
 function processExcel(){
   const fileInput=document.getElementById('excelUpload');
   if(!fileInput.files.length) return alert('Select an Excel file first.');
-  const file=fileInput.files[0];
-  const reader=new FileReader();
+  const file=fileInput.files[0]; const reader=new FileReader();
   reader.onload=(e)=>{
     try{
-      const data=new Uint8Array(e.target.result);
-      const wb=XLSX.read(data,{type:'array'});
-      const sheet=wb.Sheets[wb.SheetNames[0]];
-      const grid=XLSX.utils.sheet_to_json(sheet,{header:1,blankrows:true});
+      const data=new Uint8Array(e.target.result); const wb=XLSX.read(data,{type:'array'});
+      const sheet=wb.Sheets[wb.SheetNames[0]]; const grid=XLSX.utils.sheet_to_json(sheet,{header:1,blankrows:true});
       if(!grid||grid.length<2) return alert('Excel is empty or invalid.');
       let facilityCount=0;
-      for(let r=1;r<grid.length;r++){
-        if(grid[r]&&grid[r][0]&&String(grid[r][0]).trim()!=='') facilityCount++;
-      }
+      for(let r=1;r<grid.length;r++){ if(grid[r]&&grid[r][0]&&String(grid[r][0]).trim()!=='') facilityCount++; }
       if(facilityCount===0) return alert('No valid facility rows found in Excel.');
-      document.getElementById('facilityCount').value=facilityCount;
-      generateTables();
-      const tables={};
-      document.querySelectorAll('#tablesContainer table').forEach(t=>tables[t.getAttribute('data-category')]=t);
+      document.getElementById('facilityCount').value=facilityCount; generateTables();
+      const tables={}; document.querySelectorAll('#tablesContainer table').forEach(t=>tables[t.getAttribute('data-category')]=t);
       let rowIndex=0;
       for(let r=1;r<grid.length;r++){
         const row=grid[r]; if(!row||!row[0]||String(row[0]).trim()==='') continue;
         const fname=String(row[0]).trim();
         categories.forEach((cat,ci)=>{
           const tr=tables[cat.name].querySelectorAll('tbody tr')[rowIndex];
-          if(!tr) return;
-          const inputs=tr.querySelectorAll('td input'); inputs[0].value=fname;
-          for(let m=0;m<24;m++){
-            const colIndex=1+ci*24+m;
-            const val=parseCell(row[colIndex]);
-            inputs[m+1].value=val===null?'':val;
-          }
+          if(!tr) return; const inputs=tr.querySelectorAll('td input'); inputs[0].value=fname;
+          for(let m=0;m<24;m++){ const colIndex=1+ci*24+m; const val=parseCell(row[colIndex]); inputs[m+1].value=val===null?'':val; }
         });
         rowIndex++;
       }
@@ -185,8 +172,7 @@ function processExcel(){
 
 /* ----------------- Display Summary ----------------- */
 function displaySummary(){
-  unifiedSummary=[];
-  const tableMap={};
+  unifiedSummary=[]; const tableMap={};
   document.querySelectorAll('#tablesContainer table').forEach(t=>tableMap[t.getAttribute('data-category')]=t);
   const facilityMap=new Map();
   categories.forEach(cat=>{
@@ -200,20 +186,13 @@ function displaySummary(){
     });
   });
   unifiedSummary=Array.from(facilityMap.values());
-  if(unifiedSummary.length===0){
-    document.getElementById('summaryOutput').innerHTML='<p>No facility data found in tables.</p>';
-    document.getElementById('regressBtn').style.display='none';
-    return;
-  }
-  renderSummary(unifiedSummary);
-  document.getElementById('regressBtn').style.display='inline-block';
+  if(unifiedSummary.length===0){ document.getElementById('summaryOutput').innerHTML='<p>No facility data found in tables.</p>'; document.getElementById('regressBtn').style.display='none'; return;}
+  renderSummary(unifiedSummary); document.getElementById('regressBtn').style.display='inline-block';
 }
 
 function renderSummary(list){
   let html='<table class="table table-bordered table-sm"><thead><tr><th>Facility</th><th>Total Energy</th><th>Total Production</th><th>Avg Weather1</th><th>Avg Weather2</th></tr></thead><tbody>';
-  list.forEach(f=>{
-    html+=`<tr><td>${f.facility}</td><td>${sumNonNull(f.Energy).toFixed(2)}</td><td>${sumNonNull(f.Production).toFixed(2)}</td><td>${avgNonNull(f.Weather1)?.toFixed(2)||'-'}</td><td>${avgNonNull(f.Weather2)?.toFixed(2)||'-'}</td></tr>`;
-  });
+  list.forEach(f=>{ html+=`<tr><td>${f.facility}</td><td>${sumNonNull(f.Energy).toFixed(2)}</td><td>${sumNonNull(f.Production).toFixed(2)}</td><td>${avgNonNull(f.Weather1)?.toFixed(2)||'-'}</td><td>${avgNonNull(f.Weather2)?.toFixed(2)||'-'}</td></tr>`; });
   html+='</tbody></table>'; document.getElementById('summaryOutput').innerHTML=html;
 }
 
@@ -224,58 +203,37 @@ function runOLSRegression(){
   unifiedSummary.forEach(f=>{
     for(let i=0;i<24;i++){
       const e=f.Energy[i], p=f.Production[i], w1=f.Weather1[i], w2=f.Weather2[i];
-      if(e!==null && p!==null && w1!==null && w2!==null){
-        X.push([1,p,w1,w2]);
-        Y.push(e);
-      }
+      if(e!==null && p!==null && w1!==null && w2!==null){ X.push([1,p,w1,w2]); Y.push(e); }
     }
   });
   if(Y.length<5) return alert('Not enough data for regression.');
   try{
-    const Xt=math.transpose(X);
-    const XtX=math.multiply(Xt,X);
-    const XtXinv=math.inv(XtX);
-    const XtY=math.multiply(Xt,Y);
-    const beta=math.multiply(XtXinv,XtY);
+    const Xt=math.transpose(X), XtX=math.multiply(Xt,X), XtXinv=math.inv(XtX), XtY=math.multiply(Xt,Y), beta=math.multiply(XtXinv,XtY);
     regressionCoeffs=beta;
-
-    const Yhat=X.map(row=>math.dot(row,beta));
-    const residuals=Y.map((y,i)=>y-Yhat[i]);
-
-    const N=Y.length, p=X[0].length;
+    const Yhat=X.map(row=>math.dot(row,beta)), residuals=Y.map((y,i)=>y-Yhat[i]), N=Y.length, p=X[0].length;
     const residualVariance=residuals.reduce((s,r)=>s+r*r,0)/(N-p);
     const se=math.diag(XtXinv).map(v=>Math.sqrt(v*residualVariance));
     const tStats=beta.map((b,i)=>b/se[i]);
     const pValues=tStats.map(t=>2*(1-jStat.studentt.cdf(Math.abs(t),N-p)));
-
     const Ymean=Y.reduce((a,b)=>a+b,0)/N;
     const SSres=residuals.reduce((s,r)=>s+r*r,0);
     const SStot=Y.reduce((s,y)=>s+(y-Ymean)**2,0);
     const R2=1-SSres/SStot;
     const adjR2=1-(1-R2)*(N-1)/(N-p);
-
     let html='<table class="table table-sm table-bordered"><thead><tr><th>Coefficient</th><th>Estimate</th><th>Std. Error</th><th>t value</th><th>p value</th></tr></thead><tbody>';
-    ['Intercept','Production','Weather1','Weather2'].forEach((name,i)=>{
-      html+=`<tr><td>${name}</td><td>${beta[i].toFixed(4)}</td><td>${se[i].toFixed(4)}</td><td>${tStats[i].toFixed(3)}</td><td>${pValues[i].toFixed(4)}</td></tr>`;
-    });
-    html+='</tbody></table>';
-    html+=`<p><strong>R²:</strong> ${R2.toFixed(4)} | <strong>Adj R²:</strong> ${adjR2.toFixed(4)} | <strong>Residual Std Error:</strong> ${Math.sqrt(residualVariance).toFixed(4)}</p>`;
-    document.getElementById('regressionOutput').innerHTML=html;
-
-    renderEERSummary();
-
+    ['Intercept','Production','Weather1','Weather2'].forEach((name,i)=>{ html+=`<tr><td>${name}</td><td>${beta[i].toFixed(4)}</td><td>${se[i].toFixed(4)}</td><td>${tStats[i].toFixed(3)}</td><td>${pValues[i].toFixed(4)}</td></tr>`; });
+    html+='</tbody></table>'; html+=`<p><strong>R²:</strong> ${R2.toFixed(4)} | <strong>Adj R²:</strong> ${adjR2.toFixed(4)} | <strong>Residual Std Error:</strong> ${Math.sqrt(residualVariance).toFixed(4)}</p>`;
+    document.getElementById('regressionOutput').innerHTML=html; renderEERSummary();
   }catch(err){ alert('Regression failed: '+err.message);}
 }
 
-/* ----------------- EER Summary ----------------- */
+/* ----------------- EER Summary & Savings ----------------- */
 function renderEERSummary(){
   if(!unifiedSummary||!regressionCoeffs) return;
   let html='<table class="table table-bordered table-sm"><thead><tr><th>Facility</th><th>Total Energy</th><th>Total Production</th><th>Actual EUI</th><th>Predicted EUI</th><th>EER</th><th>New EUI</th></tr></thead><tbody>';
-  const eerList=[];
-  const cutoff=parseFloat(document.getElementById('cutoffEER').value)||0;
+  const eerList=[]; const cutoff=parseFloat(document.getElementById('cutoffEER').value)||0;
   unifiedSummary.forEach(f=>{
-    const totalE=sumNonNull(f.Energy);
-    const totalP=sumNonNull(f.Production);
+    const totalE=sumNonNull(f.Energy), totalP=sumNonNull(f.Production);
     const actualEUI=(totalP>0)?totalE/totalP:null;
     const predEnergy=f.Production.map(p=>math.dot([1,p,avgNonNull(f.Weather1)||0, avgNonNull(f.Weather2)||0], regressionCoeffs));
     const totalPred=sumNonNull(predEnergy);
@@ -285,17 +243,13 @@ function renderEERSummary(){
     eerList.push({facility:f.facility,eer});
     html+=`<tr><td>${f.facility}</td><td>${totalE.toFixed(2)}</td><td>${totalP.toFixed(2)}</td><td>${actualEUI===null?'-':actualEUI.toFixed(4)}</td><td>${predictedEUI===null?'-':predictedEUI.toFixed(4)}</td><td>${eer===null?'-':eer.toFixed(4)}</td><td>${newEUI===null?'-':newEUI.toFixed(4)}</td></tr>`;
   });
-  html+='</tbody></table>'; document.getElementById('eerSummary').innerHTML=html;
-  renderPossibleSavings(cutoff);
-  renderOgive(eerList);
+  html+='</tbody></table>'; document.getElementById('eerSummary').innerHTML=html; renderPossibleSavings(cutoff); renderOgive(eerList);
 }
 
-/* ----------------- Possible Savings / Credits ----------------- */
 function renderPossibleSavings(cutoff){
   let html='<table class="table table-bordered table-sm"><thead><tr><th>Facility</th><th>Old EER</th><th>New EER</th><th>Production</th><th>Possible Savings / Credits</th></tr></thead><tbody>';
   unifiedSummary.forEach(f=>{
-    const totalE=sumNonNull(f.Energy);
-    const totalP=sumNonNull(f.Production);
+    const totalE=sumNonNull(f.Energy), totalP=sumNonNull(f.Production);
     const actualEUI=(totalP>0)?totalE/totalP:null;
     const predEnergy=f.Production.map(p=>math.dot([1,p,avgNonNull(f.Weather1)||0, avgNonNull(f.Weather2)||0], regressionCoeffs));
     const totalPred=sumNonNull(predEnergy);
@@ -308,7 +262,6 @@ function renderPossibleSavings(cutoff){
   html+='</tbody></table>'; document.getElementById('savingsTable').innerHTML=html;
 }
 
-/* ----------------- Ogive Chart ----------------- */
 function renderOgive(eerList){
   if(!eerList||eerList.length===0) return;
   const sorted=eerList.map(x=>x.eer).filter(x=>x!==null).sort((a,b)=>a-b);
@@ -322,36 +275,55 @@ function renderOgive(eerList){
   });
 }
 
-/* ----------------- Admin Utilities ----------------- */
 function applyCutoff(){ renderEERSummary(); }
 function resetAdmin(){ document.getElementById('tablesContainer').innerHTML=''; document.getElementById('summaryOutput').innerHTML=''; document.getElementById('regressionOutput').innerHTML=''; document.getElementById('eerSummary').innerHTML=''; document.getElementById('savingsTable').innerHTML=''; if(ogiveChart) ogiveChart.destroy(); regressionCoeffs=null; unifiedSummary=[]; document.getElementById('regressBtn').style.display='none'; }
 
 /* ----------------- Facility Tab ----------------- */
 function generateFacilityTable(){
-  const name=document.getElementById('facilityName').value.trim();
-  if(!name) return alert('Enter facility name');
+  const name=document.getElementById('facilityName').value.trim(); if(!name) return alert('Enter facility name');
   const container=document.getElementById('facilityInputs'); container.innerHTML='';
   const table=document.createElement('table'); table.className='table table-bordered table-sm';
-  let tr=document.createElement('tr'); tr.innerHTML='<th>Month</th>'; for(let m=1;m<=24;m++) tr.innerHTML+=`<th>${m}</th>`; table.appendChild(tr);
-  tr=document.createElement('tr'); tr.innerHTML='<td>Production</td>'; for(let m=1;m<=24;m++) tr.innerHTML+=`<td><input type="text" class="form-control data-input"></td>`; table.appendChild(tr);
-  tr=document.createElement('tr'); tr.innerHTML='<td>Energy</td>'; for(let m=1;m<=24;m++) tr.innerHTML+=`<td><input type="text" class="form-control data-input"></td>`; table.appendChild(tr);
+  table.innerHTML='<tr><th>Month</th><th>Energy</th><th>Production</th></tr>';
+  for(let m=1;m<=24;m++){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${m}</td><td><input type="text" class="form-control data-input"></td><td><input type="text" class="form-control data-input"></td>`;
+    table.appendChild(tr);
+  }
   container.appendChild(table);
-
   const btn=document.createElement('button'); btn.className='btn btn-success mt-2'; btn.innerText='Compute Facility EER'; btn.onclick=()=>computeFacilityEER(name); container.appendChild(btn);
 }
 
 function computeFacilityEER(name){
-  const table=document.querySelector('#facilityInputs table');
-  if(!table) return;
-  const prodInputs=table.querySelectorAll('tr:nth-child(2) input');
-  const energyInputs=table.querySelectorAll('tr:nth-child(3) input');
-  let totalP=0, totalE=0;
+  const table=document.querySelector('#facilityInputs table'); if(!table) return;
+  const energyInputs=table.querySelectorAll('tr td:nth-child(2) input');
+  const prodInputs=table.querySelectorAll('tr td:nth-child(3) input');
+  let totalE=0, totalP=0; const energy=[], production=[];
   for(let i=0;i<24;i++){
-    const p=parseCell(prodInputs[i].value), e=parseCell(energyInputs[i].value);
-    if(p!==null) totalP+=p; if(e!==null) totalE+=e;
+    const e=parseCell(energyInputs[i].value), p=parseCell(prodInputs[i].value);
+    energy.push(e!==null?e:0); production.push(p!==null?p:0);
+    if(e!==null) totalE+=e; if(p!==null) totalP+=p;
   }
-  const actualEUI=(totalP>0)?totalE/totalP:null;
-  document.getElementById('facilityResults').innerHTML=`<p><strong>${name}</strong> Total Production: ${totalP.toFixed(2)}, Total Energy: ${totalE.toFixed(2)}, Actual EUI: ${actualEUI===null?'-':actualEUI.toFixed(4)}</p>`;
+  const actualEUI=(totalP>0)?totalE/totalP:null; const cutoff=parseFloat(document.getElementById('facilityCutoff').value)||0;
+  let actualEER=null, newEUI=null, possibleSavings=null;
+  if(actualEUI!==null && regressionCoeffs){
+    const avgWeather1=0, avgWeather2=0;
+    const predEnergy=production.map(p=>math.dot([1,p,avgWeather1,avgWeather2],regressionCoeffs));
+    const totalPred=sumNonNull(predEnergy); const predictedEUI=(totalP>0)?totalPred/totalP:null;
+    actualEER=(predictedEUI!==0)?actualEUI/predictedEUI:null; newEUI=(predictedEUI!==null)?cutoff*predictedEUI:null;
+    possibleSavings=(actualEER!==null && newEUI!==null)?(actualEUI-newEUI)*totalP:null;
+  }
+  document.getElementById('facilityResults').innerHTML=`
+    <p><strong>${name}</strong></p>
+    <ul>
+      <li>Total Energy: ${totalE.toFixed(2)}</li>
+      <li>Total Production: ${totalP.toFixed(2)}</li>
+      <li>Actual EUI: ${actualEUI===null?'-':actualEUI.toFixed(4)}</li>
+      <li>Actual EER: ${actualEER===null?'-':actualEER.toFixed(4)}</li>
+      <li>Required New EER: ${cutoff.toFixed(2)}</li>
+      <li>Required New EUI: ${newEUI===null?'-':newEUI.toFixed(4)}</li>
+      <li>Possible Energy Savings (2 yrs): ${possibleSavings===null?'-':possibleSavings.toFixed(2)}</li>
+    </ul>
+  `;
 }
 
 function resetFacility(){ document.getElementById('facilityInputs').innerHTML=''; document.getElementById('facilityResults').innerHTML=''; document.getElementById('facilityName').value=''; }
